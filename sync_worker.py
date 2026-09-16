@@ -17,7 +17,7 @@ batch_limit = int(os.environ.get('BATCH_LIMIT', '2'))
 async def download_turbo(client, document, out_file, max_workers=8):
     dc_id, location = utils.get_input_location(document)
     file_size = document.size
-    chunk_size = 512 * 1024 # 512 KB per MTProto chunk
+    chunk_size = 512 * 1024 # 512 KB (exact power of 2 and multiple of 4096)
     total_parts = math.ceil(file_size / chunk_size)
     print(f"🚀 Multi-Connection Turbo Download: {file_size/(1024*1024):.1f}MB ({total_parts} chunks) with {max_workers} parallel workers...")
     
@@ -36,7 +36,8 @@ async def download_turbo(client, document, out_file, max_workers=8):
         while not queue.empty():
             part = await queue.get()
             offset = part * chunk_size
-            limit = min(chunk_size, file_size - offset)
+            # Telegram requires limit to be divisible by 4096/power of 2. Always pass chunk_size!
+            limit = chunk_size
             
             for retry in range(5):
                 try:
@@ -50,7 +51,7 @@ async def download_turbo(client, document, out_file, max_workers=8):
                     async with lock:
                         downloaded += len(result.bytes)
                         if downloaded % (50 * 1024 * 1024) < len(result.bytes):
-                            pct = (downloaded / file_size) * 100
+                            pct = min(100.0, (downloaded / file_size) * 100)
                             print(f"  [Download Progress] {downloaded/(1024*1024):.1f}MB / {file_size/(1024*1024):.1f}MB ({pct:.1f}%)", flush=True)
                     break
                 except Exception as e:
@@ -110,7 +111,7 @@ async def main():
         
         local_path = f"/tmp/{fn}"
         
-        # Robust parallel download using msg.document
+        # Robust parallel download
         await download_turbo(client, msg.document, local_path, max_workers=8)
         
         # Upload
